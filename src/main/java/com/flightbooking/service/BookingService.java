@@ -15,21 +15,38 @@ import com.flightbooking.model.Booking;
 import com.flightbooking.model.Flight;
 import com.flightbooking.model.Seat;
 import com.flightbooking.model.SeatStatus;
+import com.flightbooking.dto.BookingResult;
 import com.flightbooking.repository.BookingRepository;
 import com.flightbooking.repository.FlightRepository;
+import com.flightbooking.repository.IdempotencyRepository;
 
 @Service
 public class BookingService {
 
     private final FlightRepository flightRepository;
     private final BookingRepository bookingRepository;
+    private final IdempotencyRepository idempotencyRepository;
 
-    public BookingService(FlightRepository flightRepository, BookingRepository bookingRepository) {
+    public BookingService(FlightRepository flightRepository,
+                          BookingRepository bookingRepository,
+                          IdempotencyRepository idempotencyRepository) {
         this.flightRepository = flightRepository;
         this.bookingRepository = bookingRepository;
+        this.idempotencyRepository = idempotencyRepository;
     }
 
-    public BookingResponse createBooking(BookingRequest request) {
+    public BookingResult createBooking(String idempotencyKey, BookingRequest request) {
+        return idempotencyRepository.findByKey(idempotencyKey)
+                .map(response -> new BookingResult(response, true))
+                .orElseGet(() -> {
+                    BookingResponse response = executeBooking(request);
+                    // Only successful bookings are stored; failed attempts remain retryable.
+                    idempotencyRepository.save(idempotencyKey, response);
+                    return new BookingResult(response, false);
+                });
+    }
+
+    private BookingResponse executeBooking(BookingRequest request) {
         Flight flight = flightRepository.findByFlightNumber(request.getFlight())
                 .orElseThrow(() -> new FlightNotFoundException(request.getFlight()));
 
