@@ -3,6 +3,7 @@ package com.flightbooking.controller;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -12,17 +13,15 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-
-import com.flightbooking.dto.BookingRequest;
-import com.flightbooking.service.BookingService;
-import com.flightbooking.model.Flight;
-import com.flightbooking.model.SeatStatus;
-import com.flightbooking.repository.FlightRepository;
-
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.flightbooking.dto.BookingRequest;
+import com.flightbooking.model.Flight;
+import com.flightbooking.model.SeatStatus;
+import com.flightbooking.repository.FlightRepository;
+import com.flightbooking.service.BookingService;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -42,7 +41,7 @@ class BookingControllerTest {
     @BeforeEach
     void setUp() {
         idempotencyKey = UUID.randomUUID().toString();
-        resetSeats("AI101", List.of("1A", "1B", "2A"));
+        resetSeats("flight1", List.of("1", "2", "4"));
     }
 
     private void resetSeats(String flightNumber, List<String> seatNumbers) {
@@ -64,15 +63,15 @@ class BookingControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "flight": "AI101",
-                                      "seats": ["1A"],
+                                      "flight": "flight1",
+                                      "seats": ["1"],
                                       "name": "Ashutosh Kumar"
                                     }
                                     """))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.id").isNotEmpty())
-                    .andExpect(jsonPath("$.flight").value("AI101"))
-                    .andExpect(jsonPath("$.seats[0]").value("1A"))
+                    .andExpect(jsonPath("$.flight").value("flight1"))
+                    .andExpect(jsonPath("$.seats[0]").value("1"))
                     .andExpect(jsonPath("$.name").value("Ashutosh Kumar"));
         }
 
@@ -84,17 +83,17 @@ class BookingControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "flight": "AI101",
-                                      "seats": ["1A", "1B"],
+                                      "flight": "flight1",
+                                      "seats": ["1", "2"],
                                       "name": "Ashutosh Kumar"
                                     }
                                     """))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.id").isNotEmpty())
-                    .andExpect(jsonPath("$.flight").value("AI101"))
+                    .andExpect(jsonPath("$.flight").value("flight1"))
                     .andExpect(jsonPath("$.seats.length()").value(2))
-                    .andExpect(jsonPath("$.seats[0]").value("1A"))
-                    .andExpect(jsonPath("$.seats[1]").value("1B"))
+                    .andExpect(jsonPath("$.seats[0]").value("1"))
+                    .andExpect(jsonPath("$.seats[1]").value("2"))
                     .andExpect(jsonPath("$.name").value("Ashutosh Kumar"));
         }
     }
@@ -112,7 +111,7 @@ class BookingControllerTest {
                             .content("""
                                     {
                                       "flight": "XX999",
-                                      "seats": ["1A"],
+                                      "seats": ["1"],
                                       "name": "Ashutosh Kumar"
                                     }
                                     """))
@@ -133,13 +132,13 @@ class BookingControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "flight": "AI101",
-                                      "seats": ["9Z"],
+                                      "flight": "flight1",
+                                      "seats": ["99"],
                                       "name": "Ashutosh Kumar"
                                     }
                                     """))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.error").value("Seat 9Z not found on flight AI101"));
+                    .andExpect(jsonPath("$.error").value("Seat 99 not found on flight flight1"));
         }
 
         @Test
@@ -150,16 +149,16 @@ class BookingControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "flight": "AI101",
-                                      "seats": ["1A", "9Z"],
+                                      "flight": "flight1",
+                                      "seats": ["1", "99"],
                                       "name": "Ashutosh Kumar"
                                     }
                                     """))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.error").value("Seat 9Z not found on flight AI101"));
+                    .andExpect(jsonPath("$.error").value("Seat 99 not found on flight flight1"));
 
-            Flight flight = flightRepository.findByFlightNumber("AI101").orElseThrow();
-            assertThat(flight.findSeat("1A").orElseThrow().getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+            Flight flight = flightRepository.findByFlightNumber("flight1").orElseThrow();
+            assertThat(flight.findSeat("1").orElseThrow().getStatus()).isEqualTo(SeatStatus.AVAILABLE);
         }
     }
 
@@ -171,8 +170,8 @@ class BookingControllerTest {
         @DisplayName("booking an already-booked seat returns 409")
         void alreadyBookedSeat_returnsConflict() throws Exception {
             BookingRequest firstBooking = new BookingRequest();
-            firstBooking.setFlight("AI101");
-            firstBooking.setSeats(List.of("1A"));
+            firstBooking.setFlight("flight1");
+            firstBooking.setSeats(List.of("1"));
             firstBooking.setName("First Passenger");
             bookingService.createBooking("overflow-first", firstBooking);
 
@@ -181,21 +180,21 @@ class BookingControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "flight": "AI101",
-                                      "seats": ["1A"],
+                                      "flight": "flight1",
+                                      "seats": ["1"],
                                       "name": "Second Passenger"
                                     }
                                     """))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.error").value("Seat 1A on flight AI101 is already booked"));
+                    .andExpect(jsonPath("$.error").value("Seat 1 on flight flight1 is already booked"));
         }
 
         @Test
         @DisplayName("multi-seat request with one already-booked seat fails entire request")
         void oneAlreadyBookedSeatInMultiSeatRequest_failsEntireRequest() throws Exception {
             BookingRequest firstBooking = new BookingRequest();
-            firstBooking.setFlight("AI101");
-            firstBooking.setSeats(List.of("1B"));
+            firstBooking.setFlight("flight1");
+            firstBooking.setSeats(List.of("2"));
             firstBooking.setName("First Passenger");
             bookingService.createBooking("overflow-partial-first", firstBooking);
 
@@ -204,17 +203,17 @@ class BookingControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "flight": "AI101",
-                                      "seats": ["1A", "1B"],
+                                      "flight": "flight1",
+                                      "seats": ["1", "2"],
                                       "name": "Second Passenger"
                                     }
                                     """))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.error").value("Seat 1B on flight AI101 is already booked"));
+                    .andExpect(jsonPath("$.error").value("Seat 2 on flight flight1 is already booked"));
 
-            Flight flight = flightRepository.findByFlightNumber("AI101").orElseThrow();
-            assertThat(flight.findSeat("1A").orElseThrow().getStatus()).isEqualTo(SeatStatus.AVAILABLE);
-            assertThat(flight.findSeat("1B").orElseThrow().getStatus()).isEqualTo(SeatStatus.BOOKED);
+            Flight flight = flightRepository.findByFlightNumber("flight1").orElseThrow();
+            assertThat(flight.findSeat("1").orElseThrow().getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+            assertThat(flight.findSeat("2").orElseThrow().getStatus()).isEqualTo(SeatStatus.BOOKED);
         }
     }
 }
