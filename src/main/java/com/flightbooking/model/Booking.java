@@ -1,18 +1,19 @@
 package com.flightbooking.model;
 
+import java.util.List;
 import java.util.UUID;
 
 public class Booking {
 
     private final String id;
     private final String flightNumber;
-    private final String seatNumber;
+    private final List<String> seatNumbers;
     private final String passengerName;
 
-    public Booking(String flightNumber, String seatNumber, String passengerName) {
+    public Booking(String flightNumber, List<String> seatNumbers, String passengerName) {
         this.id = UUID.randomUUID().toString();
         this.flightNumber = flightNumber;
-        this.seatNumber = seatNumber;
+        this.seatNumbers = List.copyOf(seatNumbers);
         this.passengerName = passengerName;
     }
 
@@ -24,8 +25,8 @@ public class Booking {
         return flightNumber;
     }
 
-    public String getSeatNumber() {
-        return seatNumber;
+    public List<String> getSeatNumbers() {
+        return seatNumbers;
     }
 
     public String getPassengerName() {

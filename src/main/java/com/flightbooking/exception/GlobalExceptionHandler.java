@@ -30,12 +30,21 @@ public class GlobalExceptionHandler {
                 .body(errorBody(ex.getMessage()));
     }
 
+    @ExceptionHandler(SeatLockNotAcquiredException.class)
+    public ResponseEntity<Map<String, String>> handleSeatLockNotAcquired(SeatLockNotAcquiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(errorBody(ex.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationErrors(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .findFirst()
                 .map(error -> error.getDefaultMessage())
-                .orElse("Invalid request");
+                .orElseGet(() -> ex.getBindingResult().getGlobalErrors().stream()
+                        .findFirst()
+                        .map(error -> error.getDefaultMessage())
+                        .orElse("Invalid request"));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(errorBody(message));
     }
