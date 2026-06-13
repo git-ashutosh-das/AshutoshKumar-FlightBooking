@@ -1,0 +1,220 @@
+package com.flightbooking.controller;
+
+import java.util.List;
+import java.util.UUID;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+
+import com.flightbooking.dto.BookingRequest;
+import com.flightbooking.service.BookingService;
+import com.flightbooking.model.Flight;
+import com.flightbooking.model.SeatStatus;
+import com.flightbooking.repository.FlightRepository;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class BookingControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private FlightRepository flightRepository;
+
+    @Autowired
+    private BookingService bookingService;
+
+    private String idempotencyKey;
+
+    @BeforeEach
+    void setUp() {
+        idempotencyKey = UUID.randomUUID().toString();
+        resetSeats("AI101", List.of("1A", "1B", "2A"));
+    }
+
+    private void resetSeats(String flightNumber, List<String> seatNumbers) {
+        Flight flight = flightRepository.findByFlightNumber(flightNumber).orElseThrow();
+        for (String seatNumber : seatNumbers) {
+            flight.findSeat(seatNumber).orElseThrow().setStatus(SeatStatus.AVAILABLE);
+        }
+    }
+
+    @Nested
+    @DisplayName("Happy path")
+    class HappyPath {
+
+        @Test
+        @DisplayName("successful single-seat booking returns 201 with booking details")
+        void successfulBooking_singleSeat() throws Exception {
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "AI101",
+                                      "seats": ["1A"],
+                                      "name": "Ashutosh Kumar"
+                                    }
+                                    """))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.id").isNotEmpty())
+                    .andExpect(jsonPath("$.flight").value("AI101"))
+                    .andExpect(jsonPath("$.seats[0]").value("1A"))
+                    .andExpect(jsonPath("$.name").value("Ashutosh Kumar"));
+        }
+
+        @Test
+        @DisplayName("successful multi-seat booking returns 201 with all seats")
+        void successfulBooking_multipleSeats() throws Exception {
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "AI101",
+                                      "seats": ["1A", "1B"],
+                                      "name": "Ashutosh Kumar"
+                                    }
+                                    """))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.id").isNotEmpty())
+                    .andExpect(jsonPath("$.flight").value("AI101"))
+                    .andExpect(jsonPath("$.seats.length()").value(2))
+                    .andExpect(jsonPath("$.seats[0]").value("1A"))
+                    .andExpect(jsonPath("$.seats[1]").value("1B"))
+                    .andExpect(jsonPath("$.name").value("Ashutosh Kumar"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Invalid flight")
+    class InvalidFlight {
+
+        @Test
+        @DisplayName("unknown flight number returns 404")
+        void unknownFlight_returnsNotFound() throws Exception {
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "XX999",
+                                      "seats": ["1A"],
+                                      "name": "Ashutosh Kumar"
+                                    }
+                                    """))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error").value("Flight not found: XX999"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Invalid seat")
+    class InvalidSeat {
+
+        @Test
+        @DisplayName("seat not on flight returns 404")
+        void seatNotOnFlight_returnsNotFound() throws Exception {
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "AI101",
+                                      "seats": ["9Z"],
+                                      "name": "Ashutosh Kumar"
+                                    }
+                                    """))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error").value("Seat 9Z not found on flight AI101"));
+        }
+
+        @Test
+        @DisplayName("multi-seat request with one invalid seat fails entire request")
+        void oneInvalidSeatInMultiSeatRequest_failsEntireRequest() throws Exception {
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "AI101",
+                                      "seats": ["1A", "9Z"],
+                                      "name": "Ashutosh Kumar"
+                                    }
+                                    """))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error").value("Seat 9Z not found on flight AI101"));
+
+            Flight flight = flightRepository.findByFlightNumber("AI101").orElseThrow();
+            assertThat(flight.findSeat("1A").orElseThrow().getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+        }
+    }
+
+    @Nested
+    @DisplayName("Overflow booking")
+    class OverflowBooking {
+
+        @Test
+        @DisplayName("booking an already-booked seat returns 409")
+        void alreadyBookedSeat_returnsConflict() throws Exception {
+            BookingRequest firstBooking = new BookingRequest();
+            firstBooking.setFlight("AI101");
+            firstBooking.setSeats(List.of("1A"));
+            firstBooking.setName("First Passenger");
+            bookingService.createBooking("overflow-first", firstBooking);
+
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "AI101",
+                                      "seats": ["1A"],
+                                      "name": "Second Passenger"
+                                    }
+                                    """))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error").value("Seat 1A on flight AI101 is already booked"));
+        }
+
+        @Test
+        @DisplayName("multi-seat request with one already-booked seat fails entire request")
+        void oneAlreadyBookedSeatInMultiSeatRequest_failsEntireRequest() throws Exception {
+            BookingRequest firstBooking = new BookingRequest();
+            firstBooking.setFlight("AI101");
+            firstBooking.setSeats(List.of("1B"));
+            firstBooking.setName("First Passenger");
+            bookingService.createBooking("overflow-partial-first", firstBooking);
+
+            mockMvc.perform(post("/api/bookings")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "flight": "AI101",
+                                      "seats": ["1A", "1B"],
+                                      "name": "Second Passenger"
+                                    }
+                                    """))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error").value("Seat 1B on flight AI101 is already booked"));
+
+            Flight flight = flightRepository.findByFlightNumber("AI101").orElseThrow();
+            assertThat(flight.findSeat("1A").orElseThrow().getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+            assertThat(flight.findSeat("1B").orElseThrow().getStatus()).isEqualTo(SeatStatus.BOOKED);
+        }
+    }
+}
